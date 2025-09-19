@@ -1,0 +1,77 @@
+<svg width="600" height="400" viewBox="0 0 600 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="skyGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#dbeafe"/>
+      <stop offset="100%" style="stop-color:#93c5fd"/>
+    </linearGradient>
+    <linearGradient id="buildingGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8fafc"/>
+      <stop offset="100%" style="stop-color:#e2e8f0"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Sky background -->
+  <rect width="600" height="250" fill="url(#skyGradient)"/>
+  
+  <!-- Ground -->
+  <rect y="250" width="600" height="150" fill="#22c55e" opacity="0.3"/>
+  
+  <!-- Main building -->
+  <rect x="150" y="80" width="300" height="170" fill="url(#buildingGradient)" stroke="#cbd5e1" stroke-width="2"/>
+  
+  <!-- Building windows grid -->
+  <g fill="#3b82f6" opacity="0.7">
+    <!-- Floor 1 -->
+    <rect x="170" y="200" width="25" height="30" rx="2"/>
+    <rect x="210" y="200" width="25" height="30" rx="2"/>
+    <rect x="250" y="200" width="25" height="30" rx="2"/>
+    <rect x="290" y="200" width="25" height="30" rx="2"/>
+    <rect x="330" y="200" width="25" height="30" rx="2"/>
+    <rect x="370" y="200" width="25" height="30" rx="2"/>
+    
+    <!-- Floor 2 -->
+    <rect x="170" y="150" width="25" height="30" rx="2"/>
+    <rect x="210" y="150" width="25" height="30" rx="2"/>
+    <rect x="250" y="150" width="25" height="30" rx="2"/>
+    <rect x="290" y="150" width="25" height="30" rx="2"/>
+    <rect x="330" y="150" width="25" height="30" rx="2"/>
+    <rect x="370" y="150" width="25" height="30" rx="2"/>
+    
+    <!-- Floor 3 -->
+    <rect x="170" y="100" width="25" height="30" rx="2"/>
+    <rect x="210" y="100" width="25" height="30" rx="2"/>
+    <rect x="250" y="100" width="25" height="30" rx="2"/>
+    <rect x="290" y="100" width="25" height="30" rx="2"/>
+    <rect x="330" y="100" width="25" height="30" rx="2"/>
+    <rect x="370" y="100" width="25" height="30" rx="2"/>
+  </g>
+  
+  <!-- Entrance -->
+  <rect x="275" y="200" width="50" height="50" fill="#1f2937"/>
+  <rect x="285" y="210" width="30" height="40" fill="#3b82f6" opacity="0.3"/>
+  
+  <!-- Side buildings -->
+  <rect x="50" y="120" width="80" height="130" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <rect x="470" y="130" width="100" height="120" fill="#f1f5f9" stroke="#cbd5e1"/>
+  
+  <!-- Medical cross on main building -->
+  <g transform="translate(300, 60)">
+    <circle r="20" fill="#dc2626"/>
+    <rect x="-12" y="-3" width="24" height="6" fill="white"/>
+    <rect x="-3" y="-12" width="6" height="24" fill="white"/>
+  </g>
+  
+  <!-- Trees -->
+  <g fill="#22c55e">
+    <circle cx="80" cy="270" r="25"/>
+    <rect x="75" y="270" width="10" height="30" fill="#92400e"/>
+    
+    <circle cx="520" cy="280" r="20"/>
+    <rect x="515" y="280" width="10" height="25" fill="#92400e"/>
+  </g>
+  
+  <!-- Sign -->
+  <rect x="200" y="320" width="200" height="40" rx="5" fill="white" stroke="#3b82f6" stroke-width="2"/>
+  <text x="300" y="340" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#1f2937">HM Healthcare Partners</text>
+  <text x="300" y="355" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">Los Angeles Medical Center</text>
+</svg>

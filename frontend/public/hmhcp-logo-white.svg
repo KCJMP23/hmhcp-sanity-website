@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80" viewBox="0 0 200 80"><path fill="#eff6ff" d="M0 0h200v80H0z"/><defs><pattern id="a" width="60" height="60" patternUnits="userSpaceOnUse"><path fill="#eff6ff" d="M0 0h60v60H0z"/><circle cx="30" cy="30" r="20" fill="#60a5fa" opacity=".1"/></pattern></defs><path fill="url(#a)" d="M0 0h200v80H0z"/><path fill="none" stroke="#2563eb" stroke-dasharray="8,4" stroke-width="2" d="M1 1h198v78H1z" opacity=".3"/><rect width="120" height="60" x="40" y="-10" fill="#3b82f6" opacity=".3" rx="8"/><rect width="160" height="60" x="20" fill="#2563eb" opacity=".9" rx="8"/><text x="100" y="40" fill="#fff" font-family="Arial, sans-serif" font-size="18" font-weight="600" text-anchor="middle">
+    Hmhcp Logo White
+  </text><text x="100" y="60" fill="#eff6ff" font-family="Arial, sans-serif" font-size="14" opacity=".8" text-anchor="middle">
+    200 × 80
+  </text></svg>

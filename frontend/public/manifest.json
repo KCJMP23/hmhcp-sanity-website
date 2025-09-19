@@ -1,0 +1,21 @@
+{
+  "name": "HM Healthcare Partners",
+  "short_name": "HMHCP",
+  "description": "Transforming healthcare through innovation, research, and strategic partnerships",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

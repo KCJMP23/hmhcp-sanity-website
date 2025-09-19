@@ -1,0 +1,34 @@
+<svg width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="800" height="600" fill="#eff6ff"/>
+  
+  <!-- Pattern -->
+  <defs>
+    <pattern id="pattern-precognitive-health-device-mockup.png" patternUnits="userSpaceOnUse" width="60" height="60">
+      <rect width="60" height="60" fill="#eff6ff"/>
+      <circle cx="30" cy="30" r="20" fill="#60a5fa" opacity="0.1"/>
+    </pattern>
+  </defs>
+  <rect width="800" height="600" fill="url(#pattern-precognitive-health-device-mockup.png)"/>
+  
+  <!-- Border -->
+  <rect x="1" y="1" width="798" height="598" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="8,4" opacity="0.3"/>
+  
+  <!-- Center icon based on type -->
+  
+        <rect x="320" y="230" width="160" height="100" fill="#3b82f6" opacity="0.3" rx="8"/>
+      
+  
+  <!-- Label background -->
+  <rect x="80" y="520" width="640" height="60" fill="#2563eb" opacity="0.9" rx="8"/>
+  
+  <!-- Label text -->
+  <text x="400" y="560" font-family="Arial, sans-serif" font-size="18" font-weight="600" fill="white" text-anchor="middle">
+    Precognitive Health Device Mockup
+  </text>
+  
+  <!-- Subtitle -->
+  <text x="400" y="580" font-family="Arial, sans-serif" font-size="14" fill="#eff6ff" text-anchor="middle" opacity="0.8">
+    800 × 600
+  </text>
+</svg>

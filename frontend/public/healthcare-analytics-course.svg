@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><path fill="#eff6ff" d="M0 0h800v600H0z"/><defs><pattern id="a" width="60" height="60" patternUnits="userSpaceOnUse"><path fill="#eff6ff" d="M0 0h60v60H0z"/><circle cx="30" cy="30" r="20" fill="#60a5fa" opacity=".1"/></pattern></defs><path fill="url(#a)" d="M0 0h800v600H0z"/><path fill="none" stroke="#2563eb" stroke-dasharray="8,4" stroke-width="2" d="M1 1h798v598H1z" opacity=".3"/><rect width="160" height="100" x="320" y="230" fill="#3b82f6" opacity=".3" rx="8"/><rect width="640" height="60" x="80" y="520" fill="#2563eb" opacity=".9" rx="8"/><text x="400" y="560" fill="#fff" font-family="Arial, sans-serif" font-size="18" font-weight="600" text-anchor="middle">
+    Healthcare Analytics Course
+  </text><text x="400" y="580" fill="#eff6ff" font-family="Arial, sans-serif" font-size="14" opacity=".8" text-anchor="middle">
+    800 × 600
+  </text></svg>

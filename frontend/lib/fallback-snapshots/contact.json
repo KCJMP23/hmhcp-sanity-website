@@ -1,0 +1,17 @@
+{
+  "_id": "contact-fallback",
+  "_type": "contactPage",
+  "hero": {
+    "title": "Get in Touch",
+    "subtitle": "Let's discuss how we can transform healthcare together"
+  },
+  "contactInfo": {
+    "email": "contact@hmhealthcare.com",
+    "phone": "1-800-555-0123",
+    "address": "123 Healthcare Innovation Drive, Tech City, TC 12345"
+  },
+  "form": {
+    "title": "Contact Form",
+    "subtitle": "We'd love to hear from you. Send us a message and we'll respond as soon as possible."
+  }
+}

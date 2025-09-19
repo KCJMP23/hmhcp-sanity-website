@@ -1,0 +1,1003 @@
+/**
+ * Production-Ready Redis Service
+ * 
+ * Features:
+ * - Connection pooling with automatic reconnection
+ * - Cluster support for high availability
+ * - Circuit breaker pattern for fault tolerance
+ * - Comprehensive error handling and logging
+ * - Performance monitoring and metrics
+ * - Multiple cache strategies (LRU, TTL-based)
+ * - Distributed locking support
+ * - Pipeline and transaction support
+ */
+
+import Redis, { Redis as RedisClient, Cluster, ClusterNode, ClusterOptions, RedisOptions } from 'ioredis'
+import { logger } from '@/lib/logger'
+
+// Redis connection states
+export enum RedisConnectionState {
+  CONNECTING = 'connecting',
+  CONNECTED = 'connected',
+  DISCONNECTED = 'disconnected',
+  RECONNECTING = 'reconnecting',
+  ERROR = 'error'
+}
+
+// Cache key prefixes for different data types
+export enum CachePrefix {
+  SESSION = 'session:',
+  RATE_LIMIT = 'rate_limit:',
+  USER = 'user:',
+  API = 'api:',
+  CONTENT = 'content:',
+  ANALYTICS = 'analytics:',
+  TEMP = 'temp:',
+  LOCK = 'lock:',
+  QUEUE = 'queue:',
+  PUBSUB = 'pubsub:'
+}
+
+// Cache TTL values (in seconds)
+export enum CacheTTL {
+  SHORT = 60,           // 1 minute
+  MEDIUM = 300,         // 5 minutes
+  LONG = 3600,          // 1 hour
+  SESSION = 86400,      // 24 hours
+  PERSISTENT = 604800,  // 7 days
+  MONTH = 2592000      // 30 days
+}
+
+export interface RedisConfig {
+  url?: string
+  host?: string
+  port?: number
+  password?: string
+  db?: number
+  tls?: boolean
+  cluster?: boolean
+  clusterNodes?: ClusterNode[]
+  maxRetries?: number
+  retryDelay?: number
+  connectionTimeout?: number
+  commandTimeout?: number
+  keepAlive?: number
+  enableOfflineQueue?: boolean
+  lazyConnect?: boolean
+}
+
+export interface CacheOptions {
+  ttl?: number
+  prefix?: CachePrefix
+  compress?: boolean
+  tags?: string[]
+}
+
+export interface RedisMetrics {
+  hits: number
+  misses: number
+  errors: number
+  latency: number[]
+  connectionState: RedisConnectionState
+  queueSize: number
+  memoryUsage?: number
+}
+
+class RedisService {
+  private client: RedisClient | Cluster | null = null
+  private subscriber: RedisClient | null = null
+  private publisher: RedisClient | null = null
+  private config: RedisConfig
+  private state: RedisConnectionState = RedisConnectionState.DISCONNECTED
+  private metrics: RedisMetrics = {
+    hits: 0,
+    misses: 0,
+    errors: 0,
+    latency: [],
+    connectionState: RedisConnectionState.DISCONNECTED,
+    queueSize: 0
+  }
+  private circuitBreakerOpen = false
+  private circuitBreakerOpenTime = 0
+  private readonly CIRCUIT_BREAKER_TIMEOUT = 30000 // 30 seconds
+  private readonly MAX_LATENCY_SAMPLES = 100
+
+  constructor(config?: RedisConfig) {
+    this.config = this.loadConfig(config)
+  }
+
+  private loadConfig(config?: RedisConfig): RedisConfig {
+    const defaultConfig: RedisConfig = {
+      url: process.env.REDIS_URL,
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD,
+      db: parseInt(process.env.REDIS_DB || '0'),
+      tls: process.env.REDIS_TLS_ENABLED === 'true',
+      maxRetries: parseInt(process.env.REDIS_MAX_RETRIES || '3'),
+      retryDelay: parseInt(process.env.REDIS_RETRY_DELAY || '1000'),
+      connectionTimeout: parseInt(process.env.REDIS_CONNECTION_TIMEOUT || '5000'),
+      commandTimeout: parseInt(process.env.REDIS_COMMAND_TIMEOUT || '5000'),
+      keepAlive: parseInt(process.env.REDIS_KEEPALIVE || '30000'),
+      enableOfflineQueue: true,
+      lazyConnect: false
+    }
+
+    return { ...defaultConfig, ...config }
+  }
+
+  private createRedisOptions(): RedisOptions {
+    const options: RedisOptions = {
+      host: this.config.host,
+      port: this.config.port,
+      password: this.config.password,
+      db: this.config.db,
+      retryStrategy: (times: number) => {
+        if (times > (this.config.maxRetries || 3)) {
+          logger.error('Redis connection max retries exceeded')
+          this.state = RedisConnectionState.ERROR
+          return null
+        }
+        const delay = Math.min(times * (this.config.retryDelay || 1000), 5000)
+        logger.info(`Redis reconnecting in ${delay}ms (attempt ${times})`)
+        this.state = RedisConnectionState.RECONNECTING
+        return delay
+      },
+      connectTimeout: this.config.connectionTimeout,
+      commandTimeout: this.config.commandTimeout,
+      keepAlive: this.config.keepAlive,
+      enableOfflineQueue: this.config.enableOfflineQueue,
+      lazyConnect: this.config.lazyConnect,
+      showFriendlyErrorStack: process.env.NODE_ENV !== 'production'
+    }
+
+    if (this.config.tls) {
+      options.tls = {}
+    }
+
+    return options
+  }
+
+  async connect(): Promise<boolean> {
+    try {
+      if (this.client && this.state === RedisConnectionState.CONNECTED) {
+        return true
+      }
+
+      this.state = RedisConnectionState.CONNECTING
+      logger.info('Connecting to Redis...', { config: this.getSafeConfig() })
+
+      if (this.config.url) {
+        this.client = new Redis(this.config.url, this.createRedisOptions())
+      } else if (this.config.cluster && this.config.clusterNodes) {
+        this.client = new Redis.Cluster(this.config.clusterNodes, {
+          redisOptions: this.createRedisOptions()
+        } as ClusterOptions)
+      } else {
+        this.client = new Redis(this.createRedisOptions())
+      }
+
+      this.setupEventHandlers()
+
+      // Wait for connection
+      await this.client.ping()
+      
+      this.state = RedisConnectionState.CONNECTED
+      logger.info('Redis connected successfully')
+      
+      // Initialize pub/sub clients if needed
+      await this.initializePubSub()
+
+      return true
+    } catch (error) {
+      this.state = RedisConnectionState.ERROR
+      this.metrics.errors++
+      logger.error('Redis connection failed', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        config: this.getSafeConfig()
+      })
+      return false
+    }
+  }
+
+  private setupEventHandlers(): void {
+    if (!this.client) return
+
+    this.client.on('connect', () => {
+      this.state = RedisConnectionState.CONNECTED
+      this.circuitBreakerOpen = false
+      logger.info('Redis connected')
+    })
+
+    this.client.on('ready', () => {
+      logger.info('Redis ready to accept commands')
+    })
+
+    this.client.on('error', (error) => {
+      this.metrics.errors++
+      logger.error('Redis error', { error: error.message })
+      
+      // Open circuit breaker after multiple errors
+      if (this.metrics.errors > 10) {
+        this.openCircuitBreaker()
+      }
+    })
+
+    this.client.on('close', () => {
+      this.state = RedisConnectionState.DISCONNECTED
+      logger.warn('Redis connection closed')
+    })
+
+    this.client.on('reconnecting', (delay: number) => {
+      this.state = RedisConnectionState.RECONNECTING
+      logger.info(`Redis reconnecting in ${delay}ms`)
+    })
+
+    this.client.on('end', () => {
+      this.state = RedisConnectionState.DISCONNECTED
+      logger.info('Redis connection ended')
+    })
+  }
+
+  private async initializePubSub(): Promise<void> {
+    if (!this.client) return
+
+    try {
+      // Create separate clients for pub/sub to avoid blocking
+      this.subscriber = this.client.duplicate() as Redis
+      this.publisher = this.client.duplicate() as Redis
+      
+      await Promise.all([
+        this.subscriber.ping(),
+        this.publisher.ping()
+      ])
+      
+      logger.info('Redis pub/sub clients initialized')
+    } catch (error) {
+      logger.error('Failed to initialize pub/sub clients', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+    }
+  }
+
+  private openCircuitBreaker(): void {
+    this.circuitBreakerOpen = true
+    this.circuitBreakerOpenTime = Date.now()
+    logger.warn('Redis circuit breaker opened')
+  }
+
+  private isCircuitBreakerOpen(): boolean {
+    if (!this.circuitBreakerOpen) return false
+    
+    const elapsed = Date.now() - this.circuitBreakerOpenTime
+    if (elapsed > this.CIRCUIT_BREAKER_TIMEOUT) {
+      this.circuitBreakerOpen = false
+      this.metrics.errors = 0
+      logger.info('Redis circuit breaker closed')
+      return false
+    }
+    
+    return true
+  }
+
+  private recordLatency(latency: number): void {
+    this.metrics.latency.push(latency)
+    if (this.metrics.latency.length > this.MAX_LATENCY_SAMPLES) {
+      this.metrics.latency.shift()
+    }
+  }
+
+  private getSafeConfig(): Record<string, any> {
+    const { password, ...safeConfig } = this.config
+    return {
+      ...safeConfig,
+      password: password ? '***' : undefined
+    }
+  }
+
+  /**
+   * Get a value from cache
+   */
+  async get<T = string>(key: string, options?: CacheOptions): Promise<T | null> {
+    if (this.isCircuitBreakerOpen()) {
+      logger.warn('Redis circuit breaker is open, returning null')
+      return null
+    }
+
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      logger.warn('Redis not connected, returning null')
+      return null
+    }
+
+    const start = Date.now()
+    const finalKey = (options?.prefix || '') + key
+
+    try {
+      const value = await this.client.get(finalKey)
+      const latency = Date.now() - start
+      this.recordLatency(latency)
+
+      if (value === null) {
+        this.metrics.misses++
+        logger.debug('Redis cache miss', { key: finalKey, latency })
+        return null
+      }
+
+      this.metrics.hits++
+      logger.debug('Redis cache hit', { key: finalKey, latency })
+
+      // Parse JSON if the value is a JSON string
+      try {
+        return JSON.parse(value) as T
+      } catch {
+        return value as T
+      }
+    } catch (error) {
+      this.metrics.errors++
+      logger.error('Redis get error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return null
+    }
+  }
+
+  /**
+   * Set a value in cache
+   */
+  async set<T = string>(
+    key: string,
+    value: T,
+    options?: CacheOptions
+  ): Promise<boolean> {
+    if (this.isCircuitBreakerOpen()) {
+      logger.warn('Redis circuit breaker is open, skipping set')
+      return false
+    }
+
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      logger.warn('Redis not connected, skipping set')
+      return false
+    }
+
+    const start = Date.now()
+    const finalKey = (options?.prefix || '') + key
+    const ttl = options?.ttl || CacheTTL.MEDIUM
+
+    try {
+      const serializedValue = typeof value === 'string' 
+        ? value 
+        : JSON.stringify(value)
+
+      const result = await this.client.setex(finalKey, ttl, serializedValue)
+      
+      const latency = Date.now() - start
+      this.recordLatency(latency)
+      
+      logger.debug('Redis set successful', { key: finalKey, ttl, latency })
+      
+      // Handle cache tags for invalidation
+      if (options?.tags && options.tags.length > 0) {
+        await this.addToTags(finalKey, options.tags)
+      }
+      
+      return result === 'OK'
+    } catch (error) {
+      this.metrics.errors++
+      logger.error('Redis set error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return false
+    }
+  }
+
+  /**
+   * Delete a key from cache
+   */
+  async del(key: string, prefix?: CachePrefix): Promise<boolean> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return false
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      const result = await this.client.del(finalKey)
+      logger.debug('Redis delete', { key: finalKey, deleted: result })
+      return result > 0
+    } catch (error) {
+      this.metrics.errors++
+      logger.error('Redis delete error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return false
+    }
+  }
+
+  /**
+   * Check if a key exists
+   */
+  async exists(key: string, prefix?: CachePrefix): Promise<boolean> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return false
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      const result = await this.client.exists(finalKey)
+      return result > 0
+    } catch (error) {
+      logger.error('Redis exists error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return false
+    }
+  }
+
+  /**
+   * Set key expiration
+   */
+  async expire(key: string, seconds: number, prefix?: CachePrefix): Promise<boolean> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return false
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      const result = await this.client.expire(finalKey, seconds)
+      return result === 1
+    } catch (error) {
+      logger.error('Redis expire error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return false
+    }
+  }
+
+  /**
+   * Increment a counter
+   */
+  async incr(key: string, prefix?: CachePrefix): Promise<number | null> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return null
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      const result = await this.client.incr(finalKey)
+      return result
+    } catch (error) {
+      logger.error('Redis incr error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return null
+    }
+  }
+
+  /**
+   * Decrement a counter
+   */
+  async decr(key: string, prefix?: CachePrefix): Promise<number | null> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return null
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      const result = await this.client.decr(finalKey)
+      return result
+    } catch (error) {
+      logger.error('Redis decr error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return null
+    }
+  }
+
+  /**
+   * Get hash field value
+   */
+  async hget(key: string, field: string, prefix?: CachePrefix): Promise<string | null> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return null
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      const result = await this.client.hget(finalKey, field)
+      return result
+    } catch (error) {
+      logger.error('Redis hget error', {
+        key: finalKey,
+        field,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return null
+    }
+  }
+
+  /**
+   * Set hash field value
+   */
+  async hset(key: string, field: string, value: string, prefix?: CachePrefix): Promise<boolean> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return false
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      await this.client.hset(finalKey, field, value)
+      return true
+    } catch (error) {
+      logger.error('Redis hset error', {
+        key: finalKey,
+        field,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return false
+    }
+  }
+
+  /**
+   * Get all hash fields and values
+   */
+  async hgetall(key: string, prefix?: CachePrefix): Promise<Record<string, string> | null> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return null
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      const result = await this.client.hgetall(finalKey)
+      return result
+    } catch (error) {
+      logger.error('Redis hgetall error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return null
+    }
+  }
+
+  /**
+   * Add members to a set
+   */
+  async sadd(key: string, members: string[], prefix?: CachePrefix): Promise<number> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return 0
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      const result = await this.client.sadd(finalKey, ...members)
+      return result
+    } catch (error) {
+      logger.error('Redis sadd error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return 0
+    }
+  }
+
+  /**
+   * Get all members of a set
+   */
+  async smembers(key: string, prefix?: CachePrefix): Promise<string[]> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return []
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      const result = await this.client.smembers(finalKey)
+      return result
+    } catch (error) {
+      logger.error('Redis smembers error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return []
+    }
+  }
+
+  /**
+   * Remove members from a set
+   */
+  async srem(key: string, members: string[], prefix?: CachePrefix): Promise<number> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return 0
+    }
+
+    const finalKey = (prefix || '') + key
+
+    try {
+      const result = await this.client.srem(finalKey, ...members)
+      return result
+    } catch (error) {
+      logger.error('Redis srem error', {
+        key: finalKey,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return 0
+    }
+  }
+
+  /**
+   * Execute multiple commands in a pipeline
+   */
+  async pipeline(commands: Array<[string, ...any[]]>): Promise<any[]> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return []
+    }
+
+    try {
+      const pipeline = this.client.pipeline()
+      
+      for (const [command, ...args] of commands) {
+        ;(pipeline as any)[command](...args)
+      }
+      
+      const results = await pipeline.exec()
+      return results ? results.map(([err, result]) => err ? null : result) : []
+    } catch (error) {
+      logger.error('Redis pipeline error', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return []
+    }
+  }
+
+  /**
+   * Acquire a distributed lock
+   */
+  async acquireLock(
+    resource: string,
+    ttl: number = 10000,
+    retries: number = 3,
+    retryDelay: number = 200
+  ): Promise<string | null> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return null
+    }
+
+    const lockKey = CachePrefix.LOCK + resource
+    const lockValue = `${Date.now()}_${Math.random()}`
+
+    for (let i = 0; i < retries; i++) {
+      try {
+        const result = await this.client.set(
+          lockKey,
+          lockValue,
+          'PX',
+          ttl,
+          'NX'
+        )
+
+        if (result === 'OK') {
+          logger.debug('Lock acquired', { resource, ttl })
+          return lockValue
+        }
+
+        await new Promise(resolve => setTimeout(resolve, retryDelay))
+      } catch (error) {
+        logger.error('Lock acquisition error', {
+          resource,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        })
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * Release a distributed lock
+   */
+  async releaseLock(resource: string, lockValue: string): Promise<boolean> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return false
+    }
+
+    const lockKey = CachePrefix.LOCK + resource
+    
+    const script = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `
+
+    try {
+      const result = await this.client.eval(script, 1, lockKey, lockValue) as number
+      logger.debug('Lock released', { resource, success: result === 1 })
+      return result === 1
+    } catch (error) {
+      logger.error('Lock release error', {
+        resource,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return false
+    }
+  }
+
+  /**
+   * Subscribe to a channel
+   */
+  async subscribe(channel: string, callback: (message: string) => void): Promise<void> {
+    if (!this.subscriber) {
+      logger.error('Subscriber client not initialized')
+      return
+    }
+
+    try {
+      await this.subscriber.subscribe(channel)
+      
+      this.subscriber.on('message', (receivedChannel, message) => {
+        if (receivedChannel === channel) {
+          callback(message)
+        }
+      })
+      
+      logger.info('Subscribed to channel', { channel })
+    } catch (error) {
+      logger.error('Subscribe error', {
+        channel,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+    }
+  }
+
+  /**
+   * Publish to a channel
+   */
+  async publish(channel: string, message: string): Promise<number> {
+    if (!this.publisher) {
+      logger.error('Publisher client not initialized')
+      return 0
+    }
+
+    try {
+      const result = await this.publisher.publish(channel, message)
+      logger.debug('Message published', { channel, subscribers: result })
+      return result
+    } catch (error) {
+      logger.error('Publish error', {
+        channel,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return 0
+    }
+  }
+
+  /**
+   * Add keys to cache tags for bulk invalidation
+   */
+  private async addToTags(key: string, tags: string[]): Promise<void> {
+    if (!this.client) return
+
+    try {
+      const pipeline = this.client.pipeline()
+      
+      for (const tag of tags) {
+        pipeline.sadd(`tag:${tag}`, key)
+      }
+      
+      await pipeline.exec()
+    } catch (error) {
+      logger.error('Failed to add cache tags', {
+        key,
+        tags,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+    }
+  }
+
+  /**
+   * Invalidate all keys with a specific tag
+   */
+  async invalidateTag(tag: string): Promise<number> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return 0
+    }
+
+    try {
+      const tagKey = `tag:${tag}`
+      const keys = await this.client.smembers(tagKey)
+      
+      if (keys.length === 0) {
+        return 0
+      }
+      
+      const pipeline = this.client.pipeline()
+      
+      for (const key of keys) {
+        pipeline.del(key)
+      }
+      
+      pipeline.del(tagKey)
+      
+      await pipeline.exec()
+      
+      logger.info('Cache tag invalidated', { tag, keysInvalidated: keys.length })
+      return keys.length
+    } catch (error) {
+      logger.error('Tag invalidation error', {
+        tag,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return 0
+    }
+  }
+
+  /**
+   * Clear all cache (use with caution)
+   */
+  async flushAll(): Promise<boolean> {
+    if (!this.client || this.state !== RedisConnectionState.CONNECTED) {
+      return false
+    }
+
+    try {
+      await this.client.flushall()
+      logger.warn('All Redis cache cleared')
+      return true
+    } catch (error) {
+      logger.error('Flush all error', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      return false
+    }
+  }
+
+  /**
+   * Get cache metrics
+   */
+  getMetrics(): RedisMetrics {
+    return {
+      ...this.metrics,
+      connectionState: this.state,
+      queueSize: this.client ? (this.client as any).commandQueue?.length || 0 : 0
+    }
+  }
+
+  /**
+   * Get average latency
+   */
+  getAverageLatency(): number {
+    if (this.metrics.latency.length === 0) return 0
+    
+    const sum = this.metrics.latency.reduce((a, b) => a + b, 0)
+    return Math.round(sum / this.metrics.latency.length)
+  }
+
+  /**
+   * Get cache hit rate
+   */
+  getHitRate(): number {
+    const total = this.metrics.hits + this.metrics.misses
+    if (total === 0) return 0
+    
+    return Math.round((this.metrics.hits / total) * 100)
+  }
+
+  /**
+   * Health check
+   */
+  async healthCheck(): Promise<{
+    healthy: boolean
+    state: RedisConnectionState
+    latency: number
+    hitRate: number
+    errors: number
+  }> {
+    const start = Date.now()
+    let healthy = false
+
+    try {
+      if (this.client && this.state === RedisConnectionState.CONNECTED) {
+        await this.client.ping()
+        healthy = true
+      }
+    } catch (error) {
+      logger.error('Redis health check failed', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+    }
+
+    const latency = Date.now() - start
+
+    return {
+      healthy,
+      state: this.state,
+      latency,
+      hitRate: this.getHitRate(),
+      errors: this.metrics.errors
+    }
+  }
+
+  /**
+   * Gracefully disconnect from Redis
+   */
+  async disconnect(): Promise<void> {
+    try {
+      if (this.subscriber) {
+        await this.subscriber.quit()
+        this.subscriber = null
+      }
+
+      if (this.publisher) {
+        await this.publisher.quit()
+        this.publisher = null
+      }
+
+      if (this.client) {
+        await this.client.quit()
+        this.client = null
+      }
+
+      this.state = RedisConnectionState.DISCONNECTED
+      logger.info('Redis disconnected gracefully')
+    } catch (error) {
+      logger.error('Redis disconnect error', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+    }
+  }
+
+  /**
+   * Get connection state
+   */
+  getState(): RedisConnectionState {
+    return this.state
+  }
+
+  /**
+   * Check if connected
+   */
+  isConnected(): boolean {
+    return this.state === RedisConnectionState.CONNECTED
+  }
+}
+
+// Create and export singleton instance
+let redisInstance: RedisService | null = null
+
+export function getRedis(): RedisService {
+  if (!redisInstance) {
+    redisInstance = new RedisService()
+  }
+  return redisInstance
+}
+
+// Initialize connection only at runtime (not during build)
+import { shouldInitializeServices, safeServiceInit } from "@/lib/production/build-runtime-separator"
+
+if (shouldInitializeServices()) {
+  safeServiceInit("Redis", async () => {
+    const redis = getRedis()
+    await redis.connect()
+    return redis
+  })
+}
+// Export types and constants
+export { RedisService }
+
+// Default export for backward compatibility
+export default getRedis()

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080"><path fill="#eff6ff" d="M0 0h1920v1080H0z"/><defs><pattern id="a" width="60" height="60" patternUnits="userSpaceOnUse"><path fill="#eff6ff" d="M0 0h60v60H0z"/><circle cx="30" cy="30" r="20" fill="#60a5fa" opacity=".1"/></pattern></defs><path fill="url(#a)" d="M0 0h1920v1080H0z"/><path fill="none" stroke="#2563eb" stroke-dasharray="8,4" stroke-width="2" d="M1 1h1918v1078H1z" opacity=".3"/><rect width="200" height="120" x="860" y="460" fill="#3b82f6" opacity=".3" rx="12"/><circle cx="960" cy="520" r="30" fill="#60a5fa" opacity=".4"/><rect width="1536" height="60" x="192" y="1000" fill="#2563eb" opacity=".9" rx="8"/><text x="960" y="1040" fill="#fff" font-family="Arial, sans-serif" font-size="18" font-weight="600" text-anchor="middle">
+    Hero Bg
+  </text><text x="960" y="1060" fill="#eff6ff" font-family="Arial, sans-serif" font-size="14" opacity=".8" text-anchor="middle">
+    1920 × 1080
+  </text></svg>
